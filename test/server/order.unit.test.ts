@@ -20,11 +20,13 @@ void describe('order', () => {
   let next: any
 
   beforeEach(() => {
-    req = { params: { id: '1' }, body: {}, headers: {}, __: mock.fn((s) => s), socket: { remoteAddress: '127.0.0.1' } }
+    req = { params: { id: '1' }, body: { orderDetails: { paymentId: 'wallet' } }, headers: {}, __: mock.fn((s) => s), socket: { remoteAddress: '127.0.0.1' } }
     res = { json: mock.fn(), status: mock.fn(() => res) }
     next = mock.fn()
     // Reset mocks that might have been set globally or on models
     mock.restoreAll()
+    mock.method(WalletModel, 'findOne', async () => ({ balance: 1000 }))
+    mock.method(WalletModel, 'decrement', async () => {})
   })
 
   void it('should call next with error if basket does not exist', async () => {
@@ -167,7 +169,7 @@ void describe('order', () => {
     }
     mock.method(BasketModel, 'findOne', async () => basket)
     mock.method(security.authenticatedUsers, 'from', () => ({ data: { email: 'test@juice-sh.op' } }))
-    req.body.orderDetails = { deliveryMethodId: 1 }
+    req.body.orderDetails = { paymentId: 'wallet', deliveryMethodId: 1 }
     const error = new Error('Delivery error')
     mock.method(DeliveryModel, 'findOne', async () => { throw error })
 
