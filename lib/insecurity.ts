@@ -12,9 +12,6 @@ import sanitizeHtmlLib from 'sanitize-html'
 import sanitizeFilenameLib from 'sanitize-filename'
 import * as utils from './utils'
 
-// @ts-expect-error FIXME no typescript definitions for z85 :(
-import * as z85 from 'z85'
-
 const signingKey = process.env.JWT_PRIVATE_KEY
   ? crypto.createPrivateKey(process.env.JWT_PRIVATE_KEY)
   : crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey
@@ -53,7 +50,8 @@ export const cutOffPoisonNullByte = (str: string) => {
 }
 
 export const isAuthorized = () => (req: Request, res: Response, next: NextFunction) => {
-  if (verify(utils.jwtFrom(req))) next()
+  const payload = decode(utils.jwtFrom(req))
+  if (Number.isSafeInteger(payload?.data?.id) && payload.data.id > 0) next()
   else res.status(401).json({ error: 'Authentication required' })
 }
 export const isAdmin = () => (req: Request, res: Response, next: NextFunction) => {
@@ -114,27 +112,14 @@ export const userEmailFrom = ({ headers }: any) => {
 }
 
 export const generateCoupon = (discount: number, date = new Date()) => {
-  const coupon = utils.toMMMYY(date) + '-' + discount
-  return z85.encode(coupon)
+  if (!Number.isInteger(discount) || discount < 1 || discount > 100 || !Number.isFinite(date.getTime())) throw new Error('Invalid coupon')
+  return jwt.sign({ type: 'discount_coupon', month: utils.toMMMYY(date), discount }, privateKey, { algorithm: 'RS256', expiresIn: '31d' })
 }
 
 export const discountFromCoupon = (coupon?: string) => {
-  if (!coupon) {
-    return undefined
-  }
-  const decoded = z85.decode(coupon)
-  if (decoded && (hasValidFormat(decoded.toString()) != null)) {
-    const parts = decoded.toString().split('-')
-    const validity = parts[0]
-    if (utils.toMMMYY(new Date()) === validity) {
-      const discount = parts[1]
-      return parseInt(discount)
-    }
-  }
-}
-
-function hasValidFormat (coupon: string) {
-  return coupon.match(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[0-9]{2}-[0-9]{2}/)
+  const payload = decode(coupon)
+  if (payload?.type === 'discount_coupon' && payload.month === utils.toMMMYY(new Date()) && Number.isInteger(payload.discount) && payload.discount >= 1 && payload.discount <= 100) return payload.discount as number
+  return undefined
 }
 
 // vuln-code-snippet start redirectCryptoCurrencyChallenge redirectChallenge

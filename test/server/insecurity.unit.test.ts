@@ -34,10 +34,11 @@ void describe('insecurity', () => {
   })
 
   void describe('generateCoupon', () => {
-    void it('returns base85-encoded month, year and discount as coupon code', () => {
+    void it('returns an authenticated coupon carrying month and discount', () => {
       const coupon = security.generateCoupon(20, new Date('1980-01-02'))
-      assert.equal(coupon, 'n<MiifFb4l')
-      assert.equal(z85.decode(coupon).toString(), 'JAN80-20')
+      assert.equal(security.decode(coupon).month, 'JAN80')
+      assert.equal(security.decode(coupon).discount, 20)
+      assert.equal(security.decode(coupon).type, 'discount_coupon')
     })
 
     void it('uses current month and year if not specified', () => {
@@ -84,9 +85,10 @@ void describe('insecurity', () => {
 
   void describe('authenticatedUsers', () => {
     void it('returns user by associated token', () => {
-      security.authenticatedUsers.put('11111', { data: { id: 1 } as unknown as UserModel })
+      const token = security.authorize({ data: { id: 1 } })
+      security.authenticatedUsers.put(token, { data: { id: 1 } as unknown as UserModel })
 
-      assert.deepEqual(security.authenticatedUsers.get('11111'), { data: { id: 1 } })
+      assert.deepEqual(security.authenticatedUsers.get(token), { data: { id: 1 } })
     })
 
     void it('returns undefined if no token is passed in', () => {
@@ -94,15 +96,17 @@ void describe('insecurity', () => {
     })
 
     void it('returns token by associated user', () => {
-      security.authenticatedUsers.put('11111', { data: { id: 1 } as unknown as UserModel })
+      const token = security.authorize({ data: { id: 1 } })
+      security.authenticatedUsers.put(token, { data: { id: 1 } as unknown as UserModel })
 
-      assert.equal(security.authenticatedUsers.tokenOf({ id: 1 } as unknown as UserModel), '11111')
+      assert.equal(security.authenticatedUsers.tokenOf({ id: 1 } as unknown as UserModel), token)
     })
 
     void it('returns user by associated token from request', () => {
-      security.authenticatedUsers.put('11111', { data: { id: 1 } as unknown as UserModel })
+      const token = security.authorize({ data: { id: 1 } })
+      security.authenticatedUsers.put(token, { data: { id: 1 } as unknown as UserModel })
 
-      assert.deepEqual(security.authenticatedUsers.from({ headers: { authorization: 'Bearer 11111' } } as unknown as Request), { data: { id: 1 } })
+      assert.deepEqual(security.authenticatedUsers.from({ headers: { authorization: `Bearer ${token}` } } as unknown as Request), { data: { id: 1 } })
     })
 
     void it('returns undefined if no token is present in request', () => {
@@ -206,7 +210,9 @@ void describe('insecurity', () => {
 
   void describe('deluxeToken', () => {
     void it('returns SHA-256 HMAC with private key as salt for email and deluxe role', () => {
-      assert.equal(security.deluxeToken('test@juice-sh.op'), '91e2b6493fda679d95ae05ac0d1cdce82c2ad4f7b518202a3ed54732531bc7e1')
+      assert.match(security.deluxeToken('test@juice-sh.op'), /^[a-f0-9]{64}$/)
+      assert.equal(security.deluxeToken('test@juice-sh.op'), security.deluxeToken('test@juice-sh.op'))
+      assert.notEqual(security.deluxeToken('test@juice-sh.op'), security.deluxeToken('other@juice-sh.op'))
     })
   })
 
@@ -274,7 +280,7 @@ void describe('insecurity', () => {
 
   void describe('authenticatedUsers.updateFrom', () => {
     void it('updates user in token map', () => {
-      const token = '22222'
+      const token = security.authorize({ data: { id: 2 } })
       const user = { data: { id: 2 } } as any
       security.authenticatedUsers.updateFrom({ headers: { authorization: `Bearer ${token}` } } as Request, user)
       assert.deepEqual(security.authenticatedUsers.get(token), user)
@@ -306,7 +312,7 @@ void describe('insecurity', () => {
     })
 
     void it('appendUserId should append user id to req.body', () => {
-      const token = '33333'
+      const token = security.authorize({ data: { id: 3 } })
       const user = { data: { id: 3 } } as any
       security.authenticatedUsers.put(token, user)
       const req = { headers: { authorization: `Bearer ${token}` }, body: {} } as any

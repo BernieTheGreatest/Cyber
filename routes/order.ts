@@ -35,6 +35,14 @@ export function placeOrder () {
     BasketModel.findOne({ where: { id }, include: [{ model: ProductModel, paranoid: false, as: 'Products' }] })
       .then(async (basket: BasketModel | null) => {
         if (basket != null) {
+          if ((basket.Products ?? []).some(product => !Number.isSafeInteger(product.BasketItem?.quantity) || (product.BasketItem?.quantity ?? 0) <= 0)) {
+            res.status(400).json({ error: 'Quantity must be a positive integer' })
+            return
+          }
+          if (req.body.orderDetails?.paymentId !== 'wallet') {
+            res.status(402).json({ error: 'Verified wallet payment is required' })
+            return
+          }
           const customer = security.authenticatedUsers.from(req)
           const email = customer ? customer.data ? customer.data.email : '' : ''
           const orderId = security.hash(email).slice(0, 4) + '-' + utils.randomHexString(16)
@@ -162,6 +170,7 @@ export function placeOrder () {
           }
 
           db.ordersCollection.insert({
+            UserId: req.body.UserId,
             promotionalAmount: discountAmount,
             paymentId: req.body.orderDetails ? req.body.orderDetails.paymentId : null,
             addressId: req.body.orderDetails ? req.body.orderDetails.addressId : null,
@@ -198,7 +207,7 @@ function calculateApplicableDiscount (basket: BasketModel, req: Request) {
     const couponDate = Number(couponData[1])
     const campaign = campaigns[couponCode as keyof typeof campaigns]
 
-    if (campaign && couponDate == campaign.validOn) { // eslint-disable-line eqeqeq
+    if (campaign && couponDate === campaign.validOn && new Date(campaign.validOn).toDateString() === new Date().toDateString()) {
       challengeUtils.solveIf(challenges.manipulateClockChallenge, () => { return campaign.validOn < new Date().getTime() })
       return campaign.discount
     }

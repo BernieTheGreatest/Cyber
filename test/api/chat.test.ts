@@ -14,6 +14,7 @@ import { login } from './helpers/auth'
 const MOCK_LLM_PORT = 43210
 
 let app: Express
+let customerToken: string
 let mockServer: http.Server
 let onLlmRequest: (req: http.IncomingMessage, body: string, res: http.ServerResponse) => void = (_req, _body, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -98,6 +99,7 @@ before(async () => {
   })
   const result = await createTestApp()
   app = result.app
+  customerToken = (await login(app, { email: 'jim@juice-sh.op', password: 'ncc-1701' })).token
 }, { timeout: 60000 })
 
 after(async () => {
@@ -126,6 +128,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [{ role: 'user', content: 'Hi' }] })
 
@@ -143,6 +146,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [{ role: 'user', content: 'Hello' }] })
 
@@ -160,6 +164,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [{ role: 'user', content: 'What is your name?' }] })
 
@@ -179,6 +184,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [{ role: 'user', content: 'What products do you have?' }] })
 
@@ -215,6 +221,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [{ role: 'user', content: 'Do you have apple juice?' }] })
 
@@ -231,6 +238,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [{ role: 'user', content: 'Hi' }] })
 
@@ -249,6 +257,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [] })
 
@@ -267,6 +276,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json', Authorization: 'Bearer ' + token })
       .send({ messages: [{ role: 'user', content: 'Hi' }] })
 
@@ -293,6 +303,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [{ role: 'user', content: 'Show me reviews for product 1' }] })
 
@@ -300,30 +311,10 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
     assert.ok(toolResult !== undefined)
   })
 
-  void it('POST handles getOrderById tool call by reporting unauthenticated customer', { timeout: 15000 }, async () => {
-    let toolResult: string | undefined
-    let callCount = 0
-    onLlmRequest = (_req, body, res) => {
-      callCount++
-      if (callCount === 1) {
-        sendSSE(res, [
-          toolCallChunk('call_ord', 'getOrderById', '{"orderId":"abcd-0123456789abcdef"}'),
-          finishChunk('tool_calls')
-        ])
-      } else {
-        const parsed = JSON.parse(body)
-        toolResult = parsed.messages.find((m: { role: string }) => m.role === 'tool')?.content
-        sendSSE(res, [contentChunk('Done.'), finishChunk()])
-      }
+  void it('POST rejects unauthenticated and forged customer identities before invoking the model', async () => {
+    for (const token of ['', 'eyJhbGciOiJub25lIn0.eyJkYXRhIjp7ImlkIjoxfX0.']) {
+      await request(app).post('/rest/chat').set('Authorization', `Bearer ${token}`).send({ messages: [] }).expect(401)
     }
-
-    const res = await request(app)
-      .post('/rest/chat')
-      .set({ 'content-type': 'application/json' })
-      .send({ messages: [{ role: 'user', content: 'Look up my order' }] })
-
-    assert.equal(res.status, 200)
-    assert.ok(toolResult?.includes('Customer not authenticated'))
   })
 
   void it('POST handles getOrderById tool call by reporting order not found for authenticated customer', { timeout: 15000 }, async () => {
@@ -346,6 +337,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json', Authorization: 'Bearer ' + token })
       .send({ messages: [{ role: 'user', content: 'Look up my order' }] })
 
@@ -353,7 +345,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
     assert.ok(toolResult?.includes('Order not found'))
   })
 
-  void it('POST handles generateCoupon tool call and includes coupon code in tool response', { timeout: 15000 }, async () => {
+  void it('POST rejects coupon tool execution without trusted eligibility', { timeout: 15000 }, async () => {
     let toolResult: string | undefined
     let callCount = 0
     onLlmRequest = (_req, body, res) => {
@@ -372,14 +364,15 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [{ role: 'user', content: 'Give me a coupon' }] })
 
     assert.equal(res.status, 200)
     assert.ok(toolResult)
     const parsed = JSON.parse(toolResult)
-    assert.equal(parsed.discount, 5)
-    assert.ok(parsed.couponCode !== undefined)
+    assert.match(parsed.error, /verified order eligibility/)
+    assert.equal(parsed.couponCode, undefined)
   })
 
   void it('POST response SSE data lines contain valid JSON', { timeout: 15000 }, async () => {
@@ -392,6 +385,7 @@ void describe('/rest/chat', { timeout: 120000 }, () => {
 
     const res = await request(app)
       .post('/rest/chat')
+      .set('Authorization', `Bearer ${customerToken}`)
       .set({ 'content-type': 'application/json' })
       .send({ messages: [{ role: 'user', content: 'Test' }] })
 

@@ -162,11 +162,10 @@ export function chat () {
           const user = await UserModel.findByPk(userId, { attributes: ['email'] })
           if (!user) return { error: 'Customer not found' }
 
-          const maskedEmail = user.email ? user.email.replace(/[aeiou]/gi, '*') : undefined
           const order = await db.ordersCollection.findOne({ orderId })
 
           if (!order) return { error: 'Order not found' }
-          if (order.email !== maskedEmail) return { error: 'Order does not belong to the current customer' }
+          if (order.UserId !== userId) return { error: 'Order does not belong to the current customer' }
 
           return order
         }
@@ -178,11 +177,8 @@ export function chat () {
         inputSchema: z.object({
           discount: z.number().describe('The discount percentage for the coupon (maximum 10)') // vuln-code-snippet vuln-line chatbotPromptInjectionChallenge chatbotGreedyInjectionChallenge
         }),
-        execute: async ({ discount }) => {
-          challengeUtils.solveIf(challenges.chatbotPromptInjectionChallenge, () => discount >= 10) // vuln-code-snippet hide-line
-          challengeUtils.solveIf(challenges.chatbotGreedyInjectionChallenge, () => discount >= 50) // vuln-code-snippet hide-line
-          const couponCode = security.generateCoupon(discount) // vuln-code-snippet vuln-line chatbotPromptInjectionChallenge
-          return { couponCode, discount } // vuln-code-snippet neutral-line chatbotPromptInjectionChallenge
+        execute: async () => {
+          return { error: 'Coupon issuance requires verified order eligibility.' }
         }
       })
     } // vuln-code-snippet end chatbotGreedyInjectionChallenge chatbotPromptInjectionChallenge
