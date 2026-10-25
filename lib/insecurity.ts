@@ -56,6 +56,10 @@ export const isAuthorized = () => (req: Request, res: Response, next: NextFuncti
   if (verify(utils.jwtFrom(req))) next()
   else res.status(401).json({ error: 'Authentication required' })
 }
+export const isAdmin = () => (req: Request, res: Response, next: NextFunction) => {
+  if (decode(utils.jwtFrom(req))?.data?.role === roles.admin) next()
+  else res.status(403).json({ error: 'Forbidden' })
+}
 export const denyAll = () => (_req: Request, res: Response, _next: NextFunction) => {
   res.status(403).json({ error: 'Forbidden' })
 }
@@ -90,7 +94,7 @@ export const authenticatedUsers: IAuthenticatedUsers = {
     this.idMap[user.data.id] = token
   },
   get: function (token?: string) {
-    return token ? this.tokenMap[utils.unquote(token)] : undefined
+    return token && verify(utils.unquote(token)) ? this.tokenMap[utils.unquote(token)] : undefined
   },
   tokenOf: function (user: UserModel) {
     return user ? this.idMap[user.id] : undefined
@@ -190,7 +194,9 @@ export const isCustomer = (req: Request) => {
 export const appendUserId = () => {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
-      req.body.UserId = authenticatedUsers.tokenMap[utils.jwtFrom(req)].data.id
+      const user = authenticatedUsers.from(req)
+      if (!user?.data?.id) throw new Error('Authentication required')
+      req.body.UserId = user.data.id
       next()
     } catch (error: unknown) {
       res.status(401).json({ status: 'error', message: utils.getErrorMessage(error) })

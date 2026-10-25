@@ -5,44 +5,26 @@
 
 import { type Request, type Response, type NextFunction } from 'express'
 import { BasketItemModel } from '../models/basketitem'
+import { BasketModel } from '../models/basket'
 import { QuantityModel } from '../models/quantity'
 import * as challengeUtils from '../lib/challengeUtils'
 
-import * as utils from '../lib/utils'
 import { challenges } from '../data/datacache'
 import * as security from '../lib/insecurity'
 
-interface RequestWithRawBody extends Request {
-  rawBody: string
-}
-
 export function addBasketItem () {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const result = utils.parseJsonCustom((req as RequestWithRawBody).rawBody)
-    const productIds = []
-    const basketIds = []
-    const quantities = []
-
-    for (let i = 0; i < result.length; i++) {
-      if (result[i].key === 'ProductId') {
-        productIds.push(result[i].value)
-      } else if (result[i].key === 'BasketId') {
-        basketIds.push(result[i].value)
-      } else if (result[i].key === 'quantity') {
-        quantities.push(result[i].value)
-      }
-    }
-
     const user = security.authenticatedUsers.from(req)
-    if (user && basketIds[0] && basketIds[0] !== 'undefined' && Number(user.bid) != Number(basketIds[0])) { // eslint-disable-line eqeqeq
-      res.status(401).send('{\'error\' : \'Invalid BasketId\'}')
+    const basketId = req.body.BasketId
+    const basket = user && await BasketModel.findOne({ where: { id: basketId, UserId: user.data.id } })
+    if (!basket) {
+      res.status(403).json({ error: 'Forbidden' })
     } else {
       const basketItem = {
-        ProductId: productIds[productIds.length - 1],
-        BasketId: basketIds[basketIds.length - 1],
-        quantity: quantities[quantities.length - 1]
+        ProductId: req.body.ProductId,
+        BasketId: basket.id,
+        quantity: req.body.quantity
       }
-      challengeUtils.solveIf(challenges.basketManipulateChallenge, () => { return user && basketItem.BasketId && basketItem.BasketId !== 'undefined' && user.bid != basketItem.BasketId }) // eslint-disable-line eqeqeq
 
       const basketItemInstance = BasketItemModel.build(basketItem)
       try {
@@ -99,5 +81,26 @@ async function quantityCheck (req: Request, res: Response, next: NextFunction, i
     }
   } else {
     res.status(400).json({ error: res.__('You can order only up to {{quantity}} items of this product.', { quantity: product.limitPerUser.toString() }) })
+  }
+}
+
+export function listBasketItems () {
+  return async (req: Request, res: Response) => {
+    const user = security.authenticatedUsers.from(req)
+    if (!user) return res.status(401).json({ error: 'Unauthorized' })
+    const basket = await BasketModel.findOne({ where: { UserId: user.data.id } })
+    const items = basket ? await BasketItemModel.findAll({ where: { BasketId: basket.id } }) : []
+    res.json({ status: 'success', data: items })
+  }
+}
+
+export function authorizeBasketItem () {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const user = security.authenticatedUsers.from(req)
+    const item = await BasketItemModel.findByPk(req.params.id)
+    const basket = user && item && await BasketModel.findOne({ where: { id: item.BasketId, UserId: user.data.id } })
+    if (!basket) return res.status(403).json({ error: 'Forbidden' })
+    if ((req.body.BasketId !== undefined && Number(req.body.BasketId) !== basket.id) || (req.body.ProductId !== undefined && Number(req.body.ProductId) !== item.ProductId)) return res.status(403).json({ error: 'Forbidden' })
+    next()
   }
 }

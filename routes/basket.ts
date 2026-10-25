@@ -35,3 +35,12 @@ export function retrieveBasket () {
     }
   }
 }
+
+export function authorizeBasket () {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const user = security.authenticatedUsers.from(req)
+    const basket = user && await BasketModel.findOne({ where: { id: req.params.id, UserId: user.data.id } })
+    if (!basket) return res.status(403).json({ error: 'Forbidden' })
+    next()
+  }
+}

@@ -19,11 +19,13 @@ export function createProductReviews () {
       () => user?.data?.email !== req.body.author
     )
 
+    if (!user) return res.status(401).json({ error: 'Unauthorized' })
+
     try {
       await reviewsCollection.insert({
         product: req.params.id,
         message: req.body.message,
-        author: req.body.author,
+        author: user.data.email,
         likesCount: 0,
         likedBy: []
       })
