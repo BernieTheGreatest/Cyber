@@ -14,14 +14,13 @@ void describe('xml', () => {
     assert.match(result, /<root>hello<\/root>/)
   })
 
-  void it('should expand internal entities', async () => {
+  void it('rejects internal entity declarations', async () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE root [
   <!ENTITY hello "world">
 ]>
 <root>&hello;</root>`
-    const result = await parseXmlString(xml)
-    assert.match(result, /<root>world<\/root>/)
+    await assert.rejects(parseXmlString(xml), /DTD and entity/)
   })
 
   void it('should throw error on malformed XML', async () => {
@@ -50,6 +49,6 @@ void describe('xml', () => {
     // This might trigger either the libxml2 amplification protection or the VM timeout
     await assert.rejects(async () => {
       await parseXmlString(xml, 100) // 100ms timeout
-    }, /(Script execution timed out|Maximum entity amplification factor exceeded)/)
+    }, /(DTD and entity declarations are not supported)/)
   })
 })

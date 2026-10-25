@@ -6,6 +6,7 @@
 import fs from 'node:fs'
 import vm from 'node:vm'
 import path from 'node:path'
+import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import yaml from 'js-yaml'
 import unzipper from 'unzipper'
@@ -24,14 +25,42 @@ function ensureFileIsPassed ({ file }: Request, res: Response, next: NextFunctio
   }
 }
 
-async function extractZipBuffer (buffer: Buffer) {
+export async function extractZipBuffer (buffer: Buffer) {
   const directory = await unzipper.Open.buffer(buffer)
-  for (const entry of directory.files) {
-    const fileName = entry.path
-    const absolutePath = path.resolve('uploads/complaints/' + fileName)
-    challengeUtils.solveIf(challenges.fileWriteChallenge, () => { return absolutePath === path.resolve('ftp/legal.md') })
-    if (absolutePath.includes(path.resolve('.'))) {
-      await pipeline(entry.stream(), fs.createWriteStream('uploads/complaints/' + fileName))
+  if (directory.files.length > 100) throw new Error('Too many archive entries')
+  const root = path.resolve('uploads/complaints')
+  await fs.promises.mkdir(root, { recursive: true })
+  const realRoot = await fs.promises.realpath(root)
+  const entries = directory.files.map(entry => {
+    const name = entry.path
+    const destination = path.resolve(root, name)
+    const relative = path.relative(root, destination)
+    const mode = entry.externalFileAttributes >>> 16
+    if (!name || path.isAbsolute(name) || path.win32.isAbsolute(name) || name.includes('\\') || name.split('/').includes('..') || relative.startsWith('..') || path.isAbsolute(relative) || (mode & 0o170000) === 0o120000) {
+      throw new Error('Invalid archive path')
+    }
+    if (entry.uncompressedSize > 5 * 1024 * 1024) throw new Error('Archive is too large')
+    return { entry, destination }
+  })
+  let total = 0
+  for (const { entry, destination } of entries) {
+    const parent = entry.type === 'Directory' ? destination : path.dirname(destination)
+    await fs.promises.mkdir(parent, { recursive: true })
+    const realParent = await fs.promises.realpath(parent)
+    const relativeParent = path.relative(realRoot, realParent)
+    if (relativeParent.startsWith('..') || path.isAbsolute(relativeParent)) throw new Error('Invalid archive path')
+    if (entry.type === 'Directory') continue
+    const limit = new Transform({
+      transform (chunk, _encoding, callback) {
+        total += chunk.length
+        callback(total > 5 * 1024 * 1024 ? new Error('Archive is too large') : null, chunk)
+      }
+    })
+    try {
+      await pipeline(entry.stream(), limit, fs.createWriteStream(destination, { flags: 'wx' }))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') await fs.promises.unlink(destination).catch(() => {})
+      throw error
     }
   }
 }
